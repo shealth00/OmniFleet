@@ -1,0 +1,6 @@
+{
+  "name": "OmniFleet Health & Device Operations Console",
+  "description": "Unified Endpoint Management, MDM, RPM health telemetry, and Android Tablet Developer Workstations with local code-servers, NAS project sync, GitLab backup, Solid Explorer SMB storage, and SCRCPY remote control.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
