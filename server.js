@@ -17,6 +17,26 @@ app.use(express.json());
 // Serve static frontend files
 app.use(express.static(path.join(__dirname, 'dist')));
 
+// Valid device types
+const DEVICE_TYPES = {
+  'android-11': 'Android 11',
+  'android-12': 'Android 12',
+  'android-13': 'Android 13',
+  'android-14': 'Android 14',
+  'iphone': 'iPhone',
+  'iphone-15': 'iPhone 15',
+  'iphone-14': 'iPhone 14',
+  'macos': 'macOS',
+  'macos-sonoma': 'macOS Sonoma',
+  'macos-ventura': 'macOS Ventura',
+  'ipad': 'iPad',
+  'ipad-pro': 'iPad Pro',
+  'smartwatch': 'Smartwatch',
+  'wearable': 'Wearable',
+  'smartphone': 'Smartphone',
+  'tablet': 'Tablet',
+};
+
 // In-memory device storage
 let devices = [
   {
@@ -122,13 +142,25 @@ app.delete('/api/enrollment/tokens/:token', (req, res) => {
 app.post('/api/devices/enroll', validateEnrollmentToken, (req, res) => {
   const { name, type } = req.body;
   if (!name || !type) {
-    return res.status(400).json({ error: 'Name and type are required' });
+    return res.status(400).json({
+      error: 'Name and type are required',
+      supportedTypes: Object.keys(DEVICE_TYPES),
+    });
+  }
+
+  if (!DEVICE_TYPES[type]) {
+    return res.status(400).json({
+      error: `Invalid device type: ${type}`,
+      supportedTypes: Object.keys(DEVICE_TYPES),
+      message: 'Use one of the supported device types above',
+    });
   }
 
   const device = {
     id: uuidv4(),
     name,
     type,
+    typeLabel: DEVICE_TYPES[type],
     status: 'enrolled',
     batteryLevel: 100,
     cpuUsage: 0,
@@ -141,13 +173,18 @@ app.post('/api/devices/enroll', validateEnrollmentToken, (req, res) => {
 
   devices.push(device);
 
-  // Revoke token after use (optional - can allow multiple uses)
+  // Revoke token after use
   enrollmentTokens.delete(req.enrollmentToken.token);
 
   res.status(201).json({
     device,
     message: 'Device enrolled successfully',
   });
+});
+
+// Get supported device types
+app.get('/api/device-types', (req, res) => {
+  res.json(DEVICE_TYPES);
 });
 
 // Get all devices
