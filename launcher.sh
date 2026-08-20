@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# OmniFleet Desktop Launcher
-# This script starts both the backend API and frontend UI
+# OmniFleet Unified Application Launcher
+# Frontend + Backend in a single unified application
 
 set -e
 
@@ -17,5 +17,14 @@ if [ ! -d "node_modules" ]; then
     npm install
 fi
 
-# Start frontend and backend concurrently
-npm start
+echo ""
+echo "🔨 Building frontend..."
+npm run build
+
+echo ""
+echo "✅ Starting unified application..."
+echo "   Open browser to: http://localhost:3000"
+echo ""
+
+# Start the unified application
+npm run preview

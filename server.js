@@ -2,12 +2,20 @@ import express from 'express';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Serve static frontend files
+app.use(express.static(path.join(__dirname, 'dist')));
 
 // In-memory device storage (replace with DB later)
 let devices = [
@@ -103,9 +111,15 @@ app.delete('/api/devices/:id', (req, res) => {
   res.json(device[0]);
 });
 
-const PORT = process.env.PORT || 5000;
+// SPA fallback: serve index.html for all non-API routes
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
+
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 OmniFleet Backend API running on http://localhost:${PORT}`);
-  console.log(`📊 Health: http://localhost:${PORT}/api/health`);
-  console.log(`📱 Devices: http://localhost:${PORT}/api/devices`);
+  console.log(`🚀 OmniFleet running on http://localhost:${PORT}`);
+  console.log(`📊 Web UI: http://localhost:${PORT}`);
+  console.log(`📱 API: http://localhost:${PORT}/api`);
+  console.log(`💊 Health: http://localhost:${PORT}/api/health`);
 });
