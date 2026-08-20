@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=OmniFleet
+Comment=Cross-platform Device Operations and Remote Health Device Management Console
+Exec=/home/user/OmniFleet/launcher.sh
+Icon=📱
+Terminal=true
+Categories=Utility;
+StartupNotify=true
+Path=/home/user/OmniFleet
