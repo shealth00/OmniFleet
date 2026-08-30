@@ -75,8 +75,8 @@ export const QREnrollmentModal: React.FC<QREnrollmentModalProps> = ({ onClose })
     }
   }, [activeSession, activeTab]);
 
-  const handleCreateNewSession = () => {
-    const newSess = createEnrollmentSession({
+  const handleCreateNewSession = async () => {
+    const newSess = await createEnrollmentSession({
       organization: org,
       site,
       deviceGroup: group,
@@ -115,7 +115,7 @@ export const QREnrollmentModal: React.FC<QREnrollmentModalProps> = ({ onClose })
     await new Promise(r => setTimeout(r, 900));
 
     setSimStep(4); // 4: Registering hardware certificate
-    const res = completeEnrollmentFromQR(activeSession.token, {
+    const res = await completeEnrollmentFromQR(activeSession.token, {
       name: simDeviceName,
       platform: simPlatform,
     });
@@ -485,8 +485,8 @@ export const QREnrollmentModal: React.FC<QREnrollmentModalProps> = ({ onClose })
                 </div>
 
                 <button
-                  onClick={() => {
-                    handleCreateNewSession();
+                  onClick={async () => {
+                    await handleCreateNewSession();
                     setActiveTab('generate');
                   }}
                   className="w-full py-2.5 bg-gradient-to-r from-cyan-500 to-teal-500 text-slate-950 font-bold rounded-xl hover:from-cyan-400 hover:to-teal-400"

@@ -2,6 +2,7 @@ const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
@@ -107,6 +108,118 @@ app.delete('/api/devices/:id', async (req, res) => {
     res.json({ deleted: result.rows[0].id });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Device Enrollment ──
+
+function generateEnrollmentToken(prefix = 'SH-ENR') {
+  const random = crypto.randomBytes(9).toString('base64url').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+  return `${prefix}-${random}`;
+}
+
+app.get('/api/enrollment-sessions', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM enrollment_sessions ORDER BY created_at DESC');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/enrollment-sessions/:token', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM enrollment_sessions WHERE token = $1', [req.params.token]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Enrollment token not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/enrollment-sessions', async (req, res) => {
+  try {
+    const {
+      organization, site, deviceGroup, connectionMode, targetPlatform,
+      assignedPolicy, singleUse, expiresInHours,
+    } = req.body;
+
+    if (!organization) return res.status(400).json({ error: 'organization is required' });
+
+    const id = uuidv4();
+    const token = generateEnrollmentToken(targetPlatform === 'wearos' ? 'SH-WCH' : 'SH-ENR');
+    const hours = Number.isFinite(expiresInHours) && expiresInHours > 0 ? expiresInHours : 24;
+
+    const result = await pool.query(
+      `INSERT INTO enrollment_sessions
+         (id, token, organization, site, device_group, connection_mode, target_platform, assigned_policy, single_use, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, NOW() + ($10 || ' hours')::interval)
+       RETURNING *`,
+      [id, token, organization, site, deviceGroup, connectionMode || 'kiosk', targetPlatform || 'android', assignedPolicy, singleUse !== false, hours]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/enrollment-sessions/:token/complete', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { name, type, ipAddress, macAddress, firmwareVersion } = req.body;
+    const token = req.params.token;
+
+    await client.query('BEGIN');
+
+    const sessionResult = await client.query(
+      'SELECT * FROM enrollment_sessions WHERE token = $1 FOR UPDATE',
+      [token]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Invalid enrollment token' });
+    }
+
+    const session = sessionResult.rows[0];
+
+    if (new Date(session.expires_at).getTime() < Date.now()) {
+      await client.query('ROLLBACK');
+      return res.status(410).json({ error: 'Enrollment token has expired' });
+    }
+
+    if (session.single_use && session.used) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Enrollment token has already been used' });
+    }
+
+    let groupId = null;
+    if (session.device_group) {
+      const groupResult = await client.query('SELECT id FROM fleet_groups WHERE name = $1', [session.device_group]);
+      if (groupResult.rows.length > 0) groupId = groupResult.rows[0].id;
+    }
+
+    const deviceId = uuidv4();
+    const deviceResult = await client.query(
+      `INSERT INTO devices (id, name, type, status, ip_address, mac_address, firmware_version, group_id)
+       VALUES ($1,$2,$3,'online',$4,$5,$6,$7) RETURNING *`,
+      [deviceId, name || 'Enrolled Device', type || session.target_platform, ipAddress || null, macAddress || null, firmwareVersion || null, groupId]
+    );
+
+    await client.query(
+      `UPDATE enrollment_sessions
+       SET used = true, used_by_device_id = $2, last_used_at = NOW()
+       WHERE id = $1`,
+      [session.id, deviceId]
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json({ session: { ...session, used: true, used_by_device_id: deviceId }, device: deviceResult.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 

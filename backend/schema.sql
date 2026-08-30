@@ -44,3 +44,23 @@ CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status);
 CREATE INDEX IF NOT EXISTS idx_device_metrics_device_id ON device_metrics(device_id);
 CREATE INDEX IF NOT EXISTS idx_device_metrics_timestamp ON device_metrics(timestamp);
 CREATE INDEX IF NOT EXISTS idx_device_metrics_device_timestamp ON device_metrics(device_id, timestamp DESC);
+
+CREATE TABLE IF NOT EXISTS enrollment_sessions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    token VARCHAR(64) NOT NULL UNIQUE,
+    organization VARCHAR(255) NOT NULL,
+    site VARCHAR(255),
+    device_group VARCHAR(255),
+    connection_mode VARCHAR(50) NOT NULL DEFAULT 'kiosk',
+    target_platform VARCHAR(50) NOT NULL DEFAULT 'android',
+    assigned_policy VARCHAR(255),
+    single_use BOOLEAN NOT NULL DEFAULT true,
+    used BOOLEAN NOT NULL DEFAULT false,
+    used_by_device_id UUID REFERENCES devices(id) ON DELETE SET NULL,
+    last_used_at TIMESTAMP WITHOUT TIME ZONE,
+    expires_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_enrollment_sessions_token ON enrollment_sessions(token);
+CREATE INDEX IF NOT EXISTS idx_enrollment_sessions_expires_at ON enrollment_sessions(expires_at);

@@ -67,6 +67,11 @@ import {
   mockReportDefinitions 
 } from '../data/mockEnterprise';
 import { getDeviceAdapter } from '../adapters/deviceAdapters';
+import {
+  fetchEnrollmentSessions,
+  createEnrollmentSessionRemote,
+  completeEnrollmentRemote,
+} from '../services/enrollmentApi';
 
 interface DeviceContextType {
   // Core Devices & Platform
@@ -74,6 +79,7 @@ interface DeviceContextType {
   commands: CommandItem[];
   firmwarePackages: FirmwarePackage[];
   enrollmentSessions: EnrollmentSession[];
+  enrollmentSessionsLoaded: boolean;
   auditEvents: DeviceAuditEvent[];
   applications: ApplicationPackage[];
   selectedDevice: DeviceRecord | null;
@@ -164,8 +170,8 @@ interface DeviceContextType {
     targetDeviceIds: string[],
     payload?: Record<string, unknown>
   ) => Promise<CommandItem>;
-  createEnrollmentSession: (sessionData: Partial<EnrollmentSession>) => EnrollmentSession;
-  completeEnrollmentFromQR: (token: string, newDeviceData: Partial<DeviceRecord>) => { success: boolean; device?: DeviceRecord; message: string };
+  createEnrollmentSession: (sessionData: Partial<EnrollmentSession>) => Promise<EnrollmentSession>;
+  completeEnrollmentFromQR: (token: string, newDeviceData: Partial<DeviceRecord>) => Promise<{ success: boolean; device?: DeviceRecord; message: string }>;
   startFirmwareRollout: (packageId: string, targetDeviceIds: string[]) => void;
   updateDevicePatient: (deviceId: string, patient: PatientAssignment | undefined) => void;
   updateDeviceConnectionMode: (deviceId: string, mode: ConnectionMode) => void;
@@ -215,6 +221,7 @@ export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [commands, setCommands] = useState<CommandItem[]>([]);
   const [firmwarePackages, setFirmwarePackages] = useState<FirmwarePackage[]>(mockFirmwarePackages);
   const [enrollmentSessions, setEnrollmentSessions] = useState<EnrollmentSession[]>(initialEnrollmentSessions);
+  const [enrollmentSessionsLoaded, setEnrollmentSessionsLoaded] = useState<boolean>(false);
   const [auditEvents, setAuditEvents] = useState<DeviceAuditEvent[]>(initialAuditEvents);
   const [applications, setApplications] = useState<ApplicationPackage[]>(mockApplications);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
@@ -306,6 +313,26 @@ export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       timestamp: 'Just now',
     };
     setAuditEvents(prev => [newEvent, ...prev.slice(0, 49)]);
+  }, []);
+
+  // Load real enrollment sessions from the backend so a token generated in
+  // one browser (admin console) is actually visible/valid in another
+  // (a phone scanning the QR code).
+  useEffect(() => {
+    let cancelled = false;
+    fetchEnrollmentSessions()
+      .then(sessions => {
+        if (!cancelled) setEnrollmentSessions(sessions);
+      })
+      .catch(err => {
+        console.error('Failed to load enrollment sessions from backend:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setEnrollmentSessionsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Fleet Realtime Simulation Loop
@@ -1087,33 +1114,16 @@ export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   };
 
   // Existing Enrollment, Firmware & App Deployments
-  const createEnrollmentSession = (sessionData: Partial<EnrollmentSession>): EnrollmentSession => {
-    const newToken = `tok-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
-    const newSession: EnrollmentSession = {
-      id: `enr-sess-${Date.now()}`,
-      token: newToken,
+  const createEnrollmentSession = async (sessionData: Partial<EnrollmentSession>): Promise<EnrollmentSession> => {
+    const newSession = await createEnrollmentSessionRemote({
       organization: sessionData.organization || currentOrganization.name,
       site: sessionData.site || 'Chicago SNF Facility',
       deviceGroup: sessionData.deviceGroup || 'Chicago SNF Group',
       connectionMode: sessionData.connectionMode || 'kiosk',
       targetPlatform: sessionData.targetPlatform || 'android',
       assignedPolicy: sessionData.assignedPolicy || 'Strict Clinical Kiosk Policy (v2.4)',
-      createdDate: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       singleUse: sessionData.singleUse !== undefined ? sessionData.singleUse : true,
-      used: false,
-      qrPayloadJson: JSON.stringify({
-        enrollmentPortalUrl: typeof window !== 'undefined' ? `${window.location.origin}/?enroll=${newToken}` : `https://ais-dev-sk2dtvvirh4jv35sg3sjzn-1534719840.us-west2.run.app/?enroll=${newToken}`,
-        token: newToken,
-        org: sessionData.organization || currentOrganization.name,
-        site: sessionData.site || 'Chicago SNF Facility',
-        group: sessionData.deviceGroup || 'Chicago SNF Group',
-        platform: sessionData.targetPlatform || 'android',
-        mode: sessionData.connectionMode || 'kiosk',
-        nasShareUrl: 'smb://192.168.1.100/volume/projects',
-        exp: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      }, null, 2),
-    };
+    });
 
     setEnrollmentSessions(prev => [newSession, ...prev]);
     addAuditEvent({
@@ -1121,20 +1131,31 @@ export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       action: 'Generated New QR Enrollment Token',
       category: 'enrollment',
       severity: 'info',
-      details: `Target: ${newSession.targetPlatform} • Org: ${newSession.organization} • Token: ${newToken.slice(0, 5)}...`,
+      details: `Target: ${newSession.targetPlatform} • Org: ${newSession.organization} • Token: ${newSession.token.slice(0, 5)}...`,
     });
 
     return newSession;
   };
 
-  const completeEnrollmentFromQR = (token: string, newDeviceData: Partial<DeviceRecord>) => {
-    const session = enrollmentSessions.find(s => s.token === token && !s.used);
-    if (!session) {
-      return { success: false, message: 'Invalid or expired enrollment token.' };
+  const completeEnrollmentFromQR = async (
+    token: string,
+    newDeviceData: Partial<DeviceRecord>
+  ): Promise<{ success: boolean; device?: DeviceRecord; message: string }> => {
+    const session = enrollmentSessions.find(s => s.token === token);
+    const platform = (newDeviceData.platform || session?.targetPlatform || 'android') as PlatformType;
+
+    // The backend is the source of truth: it atomically checks expiry and
+    // single-use, and works no matter which browser/device is completing it.
+    const remoteResult = await completeEnrollmentRemote(token, {
+      name: newDeviceData.name,
+      type: platform,
+    });
+
+    if (!remoteResult.success) {
+      return { success: false, message: remoteResult.message };
     }
 
-    const newId = `dev-enr-${Date.now()}`;
-    const platform = (newDeviceData.platform || session.targetPlatform || 'android') as PlatformType;
+    const newId = remoteResult.backendDeviceId || `dev-enr-${Date.now()}`;
     const adapter = getDeviceAdapter(platform);
 
     const newDevice: DeviceRecord = {
@@ -1153,11 +1174,11 @@ export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       lifecycleState: 'ACTIVE',
       complianceState: 'COMPLIANT',
       ownershipType: 'corporate_dedicated',
-      managementMode: session.connectionMode,
-      connectionMode: session.connectionMode,
-      organization: session.organization,
-      site: session.site,
-      deviceGroup: session.deviceGroup,
+      managementMode: session?.connectionMode || 'kiosk',
+      connectionMode: session?.connectionMode || 'kiosk',
+      organization: session?.organization || currentOrganization.name,
+      site: session?.site,
+      deviceGroup: session?.deviceGroup,
       capabilities: adapter.getCapabilities(),
       capabilitiesList: adapter.getCapabilityList(),
       telemetry: {
@@ -1186,7 +1207,7 @@ export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     setDevices(prev => [newDevice, ...prev]);
     setEnrollmentSessions(prev =>
-      prev.map(s => (s.id === session.id ? { ...s, used: true, usedByDeviceId: newId } : s))
+      prev.map(s => (s.token === token ? { ...s, used: true, usedByDeviceId: newId } : s))
     );
 
     addAuditEvent({
@@ -1197,7 +1218,7 @@ export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       details: `Enrolled via token ${token.slice(0, 5)}... assigned to ${newDevice.deviceGroup}`,
     });
 
-    return { success: true, device: newDevice, message: 'Device successfully enrolled.' };
+    return { success: true, device: newDevice, message: remoteResult.message };
   };
 
   const startFirmwareRollout = (packageId: string, targetDeviceIds: string[]) => {
@@ -1753,6 +1774,7 @@ export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         commands,
         firmwarePackages,
         enrollmentSessions,
+        enrollmentSessionsLoaded,
         auditEvents,
         applications,
         selectedDevice,

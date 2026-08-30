@@ -17,7 +17,6 @@ import {
   Check
 } from 'lucide-react';
 import { useDevices } from '../context/DeviceContext';
-import { PlatformType } from '../types/device';
 
 interface MobileDeviceEnrollmentPortalProps {
   token: string;
@@ -28,23 +27,9 @@ export const MobileDeviceEnrollmentPortal: React.FC<MobileDeviceEnrollmentPortal
   token,
   onClose 
 }) => {
-  const { enrollmentSessions, completeEnrollmentFromQR, devices } = useDevices();
+  const { enrollmentSessions, enrollmentSessionsLoaded, completeEnrollmentFromQR, devices } = useDevices();
 
-  const session = enrollmentSessions.find(s => s.token === token) || {
-    id: 'manual-session',
-    token: token || 'SH-ENR-2026-X9921',
-    organization: 'Sally Health Systems',
-    site: 'Chicago SNF Facility',
-    deviceGroup: 'Chicago SNF Group',
-    connectionMode: 'kiosk' as const,
-    targetPlatform: 'android' as PlatformType,
-    assignedPolicy: 'Strict Clinical Kiosk Policy (v2.4)',
-    createdDate: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    singleUse: false,
-    used: false,
-    qrPayloadJson: ''
-  };
+  const session = enrollmentSessions.find(s => s.token === token);
 
   const [deviceName, setDeviceName] = useState<string>('Galaxy Tab S8 Plus');
   const [deviceModel, setDeviceModel] = useState<string>('SM-X800 (Android 14)');
@@ -71,6 +56,8 @@ export const MobileDeviceEnrollmentPortal: React.FC<MobileDeviceEnrollmentPortal
   }, []);
 
   const handleStartEnrollment = async () => {
+    if (!session) return;
+
     setEnrollStatus('enrolling');
     setCurrentStep(1);
     setStatusMessage('Validating Zero-Trust session token with Sally Health Gateway...');
@@ -89,7 +76,7 @@ export const MobileDeviceEnrollmentPortal: React.FC<MobileDeviceEnrollmentPortal
     await new Promise(r => setTimeout(r, 800));
 
     setCurrentStep(5);
-    const result = completeEnrollmentFromQR(session.token, {
+    const result = await completeEnrollmentFromQR(session.token, {
       name: deviceName,
       model: deviceModel,
       assetTag: assignedAssetTag,
@@ -97,7 +84,6 @@ export const MobileDeviceEnrollmentPortal: React.FC<MobileDeviceEnrollmentPortal
       organization: session.organization,
       site: session.site,
       deviceGroup: session.deviceGroup,
-      policyName: session.assignedPolicy,
     });
 
     if (result.success) {
@@ -110,13 +96,46 @@ export const MobileDeviceEnrollmentPortal: React.FC<MobileDeviceEnrollmentPortal
     }
   };
 
-  const termuxCommand = `curl -sSL http://192.168.1.100:3000/api/enroll-tablet.sh | bash -s -- --token ${session.token} --nas smb://192.168.1.100/volume/projects`;
+  const termuxCommand = `curl -sSL http://192.168.1.100:3000/api/enroll-tablet.sh | bash -s -- --token ${token} --nas smb://192.168.1.100/volume/projects`;
 
   const copyTermuxCommand = () => {
     navigator.clipboard.writeText(termuxCommand);
     setCopiedScript(true);
     setTimeout(() => setCopiedScript(false), 2000);
   };
+
+  if (!enrollmentSessionsLoaded) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center gap-4 p-4">
+        <div className="w-12 h-12 rounded-full border-4 border-cyan-500/20 border-t-cyan-400 animate-spin"></div>
+        <p className="text-xs text-slate-400 font-mono">Validating enrollment token with Sally Health Gateway...</p>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4 md:p-6 font-sans">
+        <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 text-center space-y-4">
+          <div className="inline-flex p-3 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/40">
+            <AlertTriangle className="w-8 h-8" />
+          </div>
+          <h1 className="text-lg font-bold text-white">Invalid Enrollment Link</h1>
+          <p className="text-xs text-slate-400 font-mono">
+            The token "{token}" doesn't match any active enrollment session. It may have expired, already been used, or never existed.
+          </p>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-mono font-bold"
+            >
+              Back to MDM Console
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4 md:p-6 font-sans">

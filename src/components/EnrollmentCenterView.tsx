@@ -50,9 +50,9 @@ export const EnrollmentCenterView: React.FC = () => {
   const [simulatedPlatform, setSimulatedPlatform] = useState<PlatformType>('android');
   const [enrollResult, setEnrollResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  const handleGenerate = (e: React.FormEvent) => {
+  const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
-    const session = createEnrollmentSession({
+    const session = await createEnrollmentSession({
       organization: currentOrganization.name,
       targetPlatform,
       connectionMode,
@@ -64,12 +64,12 @@ export const EnrollmentCenterView: React.FC = () => {
     setScanToken(session.token);
   };
 
-  const handleSimulatedEnroll = () => {
+  const handleSimulatedEnroll = async () => {
     if (!scanToken) {
       setEnrollResult({ success: false, message: 'Please enter or select a valid enrollment token.' });
       return;
     }
-    const res = completeEnrollmentFromQR(scanToken, {
+    const res = await completeEnrollmentFromQR(scanToken, {
       name: simulatedDeviceName,
       serialNumber: simulatedSerial,
       platform: simulatedPlatform,
