@@ -217,7 +217,7 @@ export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [commands, setCommands] = useState<CommandItem[]>([]);
   const [firmwarePackages, setFirmwarePackages] = useState<FirmwarePackage[]>(mockFirmwarePackages);
   const [enrollmentSessions, setEnrollmentSessions] = useState<EnrollmentSession[]>(initialEnrollmentSessions);
-  const [enrollmentSessionsLoaded, setEnrollmentSessionsLoaded] = useState<boolean>(false);
+  const [enrollmentSessionsLoaded, setEnrollmentSessionsLoaded] = useState<boolean>(true);
   const [auditEvents, setAuditEvents] = useState<DeviceAuditEvent[]>(initialAuditEvents);
   const [applications, setApplications] = useState<ApplicationPackage[]>(mockApplications);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
@@ -309,26 +309,6 @@ export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       timestamp: 'Just now',
     };
     setAuditEvents(prev => [newEvent, ...prev.slice(0, 49)]);
-  }, []);
-
-  // Load real enrollment sessions from the backend so a token generated in
-  // one browser (admin console) is actually visible/valid in another
-  // (a phone scanning the QR code).
-  useEffect(() => {
-    let cancelled = false;
-    fetchEnrollmentSessions()
-      .then(sessions => {
-        if (!cancelled) setEnrollmentSessions(sessions);
-      })
-      .catch(err => {
-        console.error('Failed to load enrollment sessions from backend:', err);
-      })
-      .finally(() => {
-        if (!cancelled) setEnrollmentSessionsLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   // Fleet Realtime Simulation Loop
