@@ -191,6 +191,36 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ device, on
           </div>
         </div>
 
+        {/* Patient Linkage & Signal Confirmation — surfaced prominently
+            because a stale/missing signal is the trigger for staff to call
+            the patient (see PROJECT_STATE plan). Real data only, never
+            fabricated when absent. */}
+        {(device.pcn || device.lastSignalConfirmedAt) && (
+          <div className="px-6 py-3 bg-slate-950/60 border-b border-slate-800 flex flex-wrap items-center gap-4 text-xs font-mono">
+            {device.pcn && (
+              <div className="flex items-center gap-1.5 text-slate-300">
+                <User className="w-3.5 h-3.5 text-cyan-400" />
+                <span>PCN {device.pcn}</span>
+                {device.patientEmail && <span className="text-slate-500">({device.patientEmail})</span>}
+              </div>
+            )}
+            {device.lastSignalConfirmedAt ? (
+              <div className="flex items-center gap-1.5 text-emerald-300">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>
+                  Signal confirmed {device.signalQuality ? `(${device.signalQuality}) ` : ''}
+                  {new Date(device.lastSignalConfirmedAt).toLocaleString()}
+                </span>
+              </div>
+            ) : device.pcn ? (
+              <div className="flex items-center gap-1.5 text-amber-300">
+                <Clock className="w-3.5 h-3.5" />
+                <span>No signal confirmed yet</span>
+              </div>
+            ) : null}
+          </div>
+        )}
+
         {/* Tab Navigation */}
         <div className="px-6 bg-slate-950/60 border-b border-slate-800 flex items-center gap-1 overflow-x-auto text-xs font-medium">
           {device.capabilities.liveScreen && (

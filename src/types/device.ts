@@ -196,6 +196,9 @@ export interface PatientAssignment {
   monitoringProtocol: string;
   assignmentStatus?: 'UNASSIGNED' | 'ASSIGNED' | 'SUSPENDED' | 'RETURNED';
   assignmentAdmin?: string;
+  // ehr_system's device-pairing identifier (cm_patients.pcn) — distinct
+  // from medicalRecordNumber above, not a clinical MRN.
+  pcn?: string;
 }
 
 export interface DeviceRecord {
@@ -243,25 +246,52 @@ export interface DeviceRecord {
     progressPercent: number;
     initiatedAt: string;
   };
+  // True only for a device genuinely under Android Management API (AMAPI)
+  // Device Owner control — everything else (including simulated/demo
+  // Android rows) is registration-only and must not claim real capabilities.
+  isAmapiManaged?: boolean;
+  amapiDeviceName?: string;
+  amapiState?: string;
+  // 'wear_os' vs 'phone_tablet' — Wear OS watches get a distinct AMAPI
+  // policy namespace and enrollment flow (see OmniFleet-Backend's
+  // routes/amapi.js policyNameForConnectionMode).
+  deviceCategory?: 'wear_os' | 'phone_tablet';
+  // Patient linkage for clinically-issued devices (watches) — mirrors
+  // OmniFleet-Backend's devices.pcn/patient_email/patient_portal_user_id.
+  // Deliberately separate from PatientAssignment.medicalRecordNumber below:
+  // pcn is ehr_system's device-pairing identifier, not a clinical MRN.
+  pcn?: string;
+  patientEmail?: string;
+  patientPortalUserId?: string;
+  // Raw-sensor "confirmation" signal state (Samsung Health Sensor SDK via
+  // sally health bridge's Wear OS module) — never raw waveform data, only
+  // that a signal was seen. Drives the "call the patient" follow-up trigger.
+  lastSignalConfirmedAt?: string;
+  signalQuality?: string;
 }
 
 export interface CommandItem {
   id: string;
-  command: 
-    | 'launch_app' 
-    | 'close_app' 
-    | 'open_url' 
-    | 'wake' 
-    | 'lock' 
-    | 'unlock' 
-    | 'reboot' 
-    | 'shutdown' 
-    | 'set_kiosk' 
-    | 'sync_mdm' 
-    | 'capture_screenshot' 
-    | 'push_config' 
+  command:
+    | 'launch_app'
+    | 'close_app'
+    | 'open_url'
+    | 'wake'
+    | 'lock'
+    | 'unlock'
+    | 'reboot'
+    | 'shutdown'
+    | 'set_kiosk'
+    | 'sync_mdm'
+    | 'capture_screenshot'
+    | 'push_config'
     | 'ota_update'
-    | 'trigger_self_diagnostic';
+    | 'trigger_self_diagnostic'
+    | 'reset_password'
+    | 'clear_app_data'
+    | 'start_lost_mode'
+    | 'stop_lost_mode'
+    | 'wipe_device';
   label: string;
   payload?: Record<string, unknown>;
   targetDeviceIds: string[];
@@ -312,6 +342,10 @@ export interface EnrollmentSession {
   used: boolean;
   usedByDeviceId?: string;
   qrPayloadJson: string;
+  // 'android_zero_touch' sessions are completed by Android's own setup
+  // wizard scanning a real Google provisioning QR — never by a browser POST
+  // to /complete, unlike the default 'omnifleet_custom' shape.
+  qrSchema?: 'omnifleet_custom' | 'android_zero_touch';
 }
 
 export interface ApplicationPackage {

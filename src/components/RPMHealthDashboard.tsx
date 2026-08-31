@@ -27,20 +27,25 @@ export const RPMHealthDashboard: React.FC = () => {
   const [selectedVitalsFilter, setSelectedVitalsFilter] = useState<'all' | 'alert' | 'streaming' | 'wearable'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Devices with RPM vitals or wearables
+  // Devices with RPM vitals (mock/legacy 'wearos' platform) or a real
+  // Wear OS watch enrolled via AMAPI (platform 'android', deviceCategory
+  // 'wear_os' — see OmniFleet-Backend's routes/amapi.js).
+  const isWatch = (d: DeviceRecord) => d.platform === 'wearos' || d.deviceCategory === 'wear_os';
   const rpmDevices = devices.filter(d => {
     const hasVitals = !!d.rpmVitals;
     if (selectedVitalsFilter === 'alert') return d.rpmVitals?.alertFlag === 'critical' || d.status === 'attention';
     if (selectedVitalsFilter === 'streaming') return d.rpmVitals?.bleStatus === 'connected';
-    if (selectedVitalsFilter === 'wearable') return d.platform === 'wearos';
-    return hasVitals || d.platform === 'wearos';
+    if (selectedVitalsFilter === 'wearable') return isWatch(d);
+    return hasVitals || isWatch(d);
   }).filter(d => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
       d.name.toLowerCase().includes(q) ||
       d.patient?.patientName.toLowerCase().includes(q) ||
-      d.patient?.medicalRecordNumber.toLowerCase().includes(q)
+      d.patient?.medicalRecordNumber.toLowerCase().includes(q) ||
+      d.pcn?.toLowerCase().includes(q) ||
+      d.patientEmail?.toLowerCase().includes(q)
     );
   });
 
@@ -139,7 +144,7 @@ export const RPMHealthDashboard: React.FC = () => {
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search patient, MRN, or watch..."
+            placeholder="Search patient, MRN, PCN, or watch..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="bg-slate-950 border border-slate-800 text-xs font-mono text-white pl-8 pr-3 py-1.5 rounded-lg focus:outline-none focus:border-teal-500"
@@ -181,8 +186,14 @@ export const RPMHealthDashboard: React.FC = () => {
                           <span>{device.patient.patientName}</span>
                           <span className="text-slate-500">({device.patient.medicalRecordNumber})</span>
                         </span>
+                      ) : device.pcn ? (
+                        <span className="text-slate-200 font-semibold flex items-center gap-1">
+                          <User className="w-3 h-3 text-cyan-400" />
+                          <span>PCN {device.pcn}</span>
+                          {device.patientEmail && <span className="text-slate-500">({device.patientEmail})</span>}
+                        </span>
                       ) : (
-                        <span className="text-slate-500 italic">No patient assigned</span>
+                        <span className="text-slate-500 italic">No patient linked</span>
                       )}
                     </div>
                   </div>
@@ -232,20 +243,30 @@ export const RPMHealthDashboard: React.FC = () => {
                     <div className="text-xs font-bold text-emerald-400 mt-1 capitalize">{vitals.activityState}</div>
                   </div>
                 </div>
+              ) : device.lastSignalConfirmedAt ? (
+                <div className="p-2.5 bg-slate-950 rounded-xl border border-emerald-500/30 mb-3 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-xs font-mono text-emerald-300">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Raw-sensor signal confirmed{device.signalQuality ? ` (${device.signalQuality})` : ''}</span>
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-mono">{new Date(device.lastSignalConfirmedAt).toLocaleString()}</span>
+                </div>
               ) : (
                 <div className="p-4 text-center text-xs text-slate-400 font-mono bg-slate-950 rounded-xl border border-slate-800 mb-3">
-                  Waiting for GATT service handshake...
+                  {isWatch(device) ? 'No signal confirmed yet' : 'Waiting for GATT service handshake...'}
                 </div>
               )}
 
               {/* Connection Diagnostics Footer */}
-              <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 pt-2 border-t border-slate-800">
-                <span className="flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-teal-400" />
-                  <span>GATT Authenticated • Health Connect Synced</span>
-                </span>
-                <span>Last Sync: {vitals?.lastRpmSync || '12s ago'}</span>
-              </div>
+              {vitals && (
+                <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 pt-2 border-t border-slate-800">
+                  <span className="flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-teal-400" />
+                    <span>GATT Authenticated • Health Connect Synced</span>
+                  </span>
+                  <span>Last Sync: {vitals.lastRpmSync}</span>
+                </div>
+              )}
             </div>
           );
         })}

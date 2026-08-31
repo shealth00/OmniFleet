@@ -1,8 +1,31 @@
 import { EnrollmentSession, ConnectionMode, PlatformType } from '../types/device';
 
-// Reach the backend on whatever host served this page (works for the admin
-// browser and for a phone that scanned a QR pointing at the LAN IP).
-const API_BASE = `${window.location.protocol}//${window.location.hostname}:5000`;
+// This box's LAN IP, reachable by any phone/tablet on the same Wi-Fi/
+// Ethernet network. Used as a fallback host below — see resolveHost().
+const LAN_FALLBACK_HOST = '10.0.0.163';
+
+// Reach the backend/frontend on whatever host actually served this page —
+// EXCEPT the two cases where that host is not a phone-reachable copy of
+// this app: "localhost"/"127.0.0.1" (always means "the device holding the
+// phone," not this box) and the AI Studio hosted preview
+// (*.ai.studio — a separate deployment with no backend of its own on port
+// 5000, so tokens generated there can never be completed). In both cases,
+// fall back to this box's LAN IP over plain http, since neither the dev
+// server nor the backend serves TLS. Exported for other services
+// (devicesApi.ts, amapiApi.ts) that need the same host resolution.
+export function resolveHost(): string {
+  const host = window.location.hostname;
+  const isLocalOnly = host === 'localhost' || host === '127.0.0.1';
+  const isDisconnectedHost = host.endsWith('.ai.studio');
+  return isLocalOnly || isDisconnectedHost ? LAN_FALLBACK_HOST : host;
+}
+
+export function resolveProtocol(): string {
+  return resolveHost() === LAN_FALLBACK_HOST ? 'http:' : window.location.protocol;
+}
+
+export const FRONTEND_BASE_URL = `${resolveProtocol()}//${resolveHost()}:3000`;
+const API_BASE = `${resolveProtocol()}//${resolveHost()}:5000`;
 
 interface BackendEnrollmentSession {
   id: string;

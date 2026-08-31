@@ -747,6 +747,104 @@ export class CustomAdapter implements IDeviceAdapter {
   }
 }
 
+// The honest capability set for a device genuinely under Android Management
+// API (AMAPI) Device Owner control — see AndroidAmapiAdapter below. This is
+// the single place "what's real" lives; UI badges/greying should read from
+// here (via adapter.hasCapability()) rather than re-deriving their own list.
+export const AMAPI_SUPPORTED_CAPABILITIES: CapabilityType[] = [
+  'LOCK', 'REBOOT', 'WIPE', 'LOCATE', // LOCATE via START_LOST_MODE/STOP_LOST_MODE
+  'POLICY_MANAGEMENT', 'PROFILE_MANAGEMENT', 'KIOSK_SINGLE_APP',
+  'APP_INSTALL', 'APP_UNINSTALL', 'APP_UPDATE', 'APP_BLOCK', 'OS_UPDATE',
+];
+
+// Real whole-device control via Google's Android Management API — the only
+// adapter in this file that isn't simulated. Everything it claims maps to
+// an actual AMAPI call in OmniFleet-Backend's services/androidManagement.js;
+// everything AMAPI can't do is reported unsupported rather than faked.
+//
+// Health/BLE/RPM telemetry is deliberately NOT claimed here — that's a
+// companion app's job (see SHIP1/PROJECTS/ANDROID/sally health bridge), not
+// something Device-Owner MDM control grants.
+export class AndroidAmapiAdapter implements IDeviceAdapter {
+  platform: PlatformType = 'android';
+
+  getCapabilities(): DeviceCapabilities {
+    return {
+      enrollment: true,
+      heartbeat: true, // via periodic backend polling, not a live push
+      screenshot: false,
+      liveScreen: false,
+      remoteControl: false,
+      appLaunch: false,
+      kiosk: true, // policy lockTaskMode
+      mdm: true,
+      healthTelemetry: false,
+      vrTelemetry: false,
+      otaFirmware: false, // only a coarse policy-level update *mode*, not "push this version"
+      reboot: true,
+      shutdown: false, // no AMAPI command for this
+      bleGatt: false,
+      fileTransfer: false,
+      scriptExecution: false,
+      patchManagement: false,
+      geofence: false,
+      chat: false,
+      capabilitiesList: this.getCapabilityList(),
+    };
+  }
+
+  getCapabilityList(): CapabilityType[] {
+    return AMAPI_SUPPORTED_CAPABILITIES;
+  }
+
+  hasCapability(cap: CapabilityType): boolean {
+    return AMAPI_SUPPORTED_CAPABILITIES.includes(cap);
+  }
+
+  canExecute(command: CommandItem['command']) {
+    const supported: CommandItem['command'][] = [
+      'reboot', 'lock', 'reset_password', 'clear_app_data',
+      'start_lost_mode', 'stop_lost_mode', 'wipe_device',
+      'set_kiosk', 'push_config', 'sync_mdm',
+    ];
+    if (supported.includes(command)) return { supported: true };
+    return { supported: false, reason: `'${command}' has no Android Management API equivalent` };
+  }
+
+  formatOsDetails(device: DeviceRecord) {
+    // Once devicesApi.ts surfaces parsed fields from amapi_raw_last_report,
+    // prefer those over this generic fallback string.
+    return `Android ${device.osVersion} • Device Owner (Android Management API)`;
+  }
+
+  getScreenStreamProfile() {
+    // No live-screen API exists in AMAPI at all.
+    return {
+      resolution: 'Unavailable',
+      framerate: 0,
+      mode: 'restricted' as const,
+    };
+  }
+
+  async executeCommand(device: DeviceRecord, command: CommandItem['command'], payload?: Record<string, unknown>) {
+    const start = performance.now();
+    const { issueDeviceCommand, wipeAmapiDevice } = await import('../services/amapiApi');
+    try {
+      const result = command === 'wipe_device'
+        ? await wipeAmapiDevice(device.id, payload?.wipeDataFlags as string[] | undefined)
+        : await issueDeviceCommand(device.id, command, payload);
+      return {
+        success: result.success,
+        message: result.message,
+        durationMs: Math.round(performance.now() - start),
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Request to backend failed';
+      return { success: false, message, durationMs: Math.round(performance.now() - start) };
+    }
+  }
+}
+
 export const adapterRegistry: Record<PlatformType, IDeviceAdapter> = {
   android: new AndroidAdapter(),
   wearos: new WearOSAdapter(),
@@ -760,6 +858,9 @@ export const adapterRegistry: Record<PlatformType, IDeviceAdapter> = {
   iot: new IOTAdapter(),
 };
 
-export function getDeviceAdapter(platform: PlatformType): IDeviceAdapter {
+const androidAmapiAdapter = new AndroidAmapiAdapter();
+
+export function getDeviceAdapter(platform: PlatformType, opts?: { isAmapiManaged?: boolean }): IDeviceAdapter {
+  if (platform === 'android' && opts?.isAmapiManaged) return androidAmapiAdapter;
   return adapterRegistry[platform] || adapterRegistry.android;
 }

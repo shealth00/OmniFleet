@@ -40,7 +40,6 @@ import {
   ReportDefinition 
 } from '../types/enterprise';
 
-import { initialMockDevices } from '../data/mockDevices';
 import { mockApplications } from '../data/mockApplications';
 import { mockFirmwarePackages } from '../data/mockFirmware';
 import { initialEnrollmentSessions, initialAuditEvents } from '../data/mockEnrollments';
@@ -68,10 +67,13 @@ import {
 } from '../data/mockEnterprise';
 import { getDeviceAdapter } from '../adapters/deviceAdapters';
 import { apiClient } from '../services/api';
+import { fetchDevices } from '../services/devicesApi';
+import { fetchAmapiStatus, AmapiStatus } from '../services/amapiApi';
 
 interface DeviceContextType {
   // Core Devices & Platform
   devices: DeviceRecord[];
+  amapiStatus: AmapiStatus | null;
   commands: CommandItem[];
   firmwarePackages: FirmwarePackage[];
   enrollmentSessions: EnrollmentSession[];
@@ -213,7 +215,9 @@ const DeviceContext = createContext<DeviceContextType | undefined>(undefined);
 
 export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // 1. Core Devices & Platform
-  const [devices, setDevices] = useState<DeviceRecord[]>(initialMockDevices);
+  // Never seeded from mock data — real devices only, loaded below.
+  const [devices, setDevices] = useState<DeviceRecord[]>([]);
+  const [amapiStatus, setAmapiStatus] = useState<AmapiStatus | null>(null);
   const [commands, setCommands] = useState<CommandItem[]>([]);
   const [firmwarePackages, setFirmwarePackages] = useState<FirmwarePackage[]>(mockFirmwarePackages);
   const [enrollmentSessions, setEnrollmentSessions] = useState<EnrollmentSession[]>(initialEnrollmentSessions);
@@ -311,48 +315,56 @@ export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     setAuditEvents(prev => [newEvent, ...prev.slice(0, 49)]);
   }, []);
 
-  // Fleet Realtime Simulation Loop
+  // Load real devices from the backend (Postgres via OmniFleet-Backend), and
+  // keep polling so newly-enrolled devices, AMAPI state changes, and
+  // signal-confirmation updates show up without a manual refresh. Devices
+  // are never seeded from or jittered by mock/simulated data.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetchDevices()
+        .then(fetched => {
+          if (!cancelled) setDevices(fetched);
+        })
+        .catch(err => {
+          console.error('Failed to load devices from backend:', err);
+        });
+    };
+    load();
+    const interval = setInterval(load, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Whether real Android Management API enrollment is configured yet
+  // (Phase 0 setup) — feeds AMAPI-dependent UI's real-vs-not-configured state.
+  useEffect(() => {
+    let cancelled = false;
+    fetchAmapiStatus()
+      .then(status => {
+        if (!cancelled) setAmapiStatus(status);
+      })
+      .catch(err => {
+        console.error('Failed to load AMAPI status:', err);
+        if (!cancelled) setAmapiStatus({ configured: false, error: err instanceof Error ? err.message : 'Request failed' });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Enterprise Subsystem Simulation Loop
+  // Note: device telemetry/RPM vitals are intentionally NOT jittered here —
+  // that data comes from the real backend poll above (or is absent) rather
+  // than being fabricated client-side. This loop only animates the
+  // still-mocked enterprise subsystems below.
   useEffect(() => {
     if (!isRealtimeActive) return;
 
     const interval = setInterval(() => {
-      // 1. Hardware & RPM Vitals Jitter
-      setDevices(prevDevices => {
-        return prevDevices.map(device => {
-          if (device.status === 'offline') return device;
-
-          const cpuDelta = (Math.random() - 0.5) * 4;
-          const newCpu = Math.max(4, Math.min(96, Math.round(device.telemetry.cpuUsagePercent + cpuDelta)));
-          
-          let newVitals = device.rpmVitals;
-          if (device.rpmVitals) {
-            const hrJitter = Math.round((Math.random() - 0.5) * 3);
-            const newHr = Math.max(50, Math.min(160, device.rpmVitals.heartRateBpm + hrJitter));
-            const spo2Delta = Math.random() > 0.85 ? (Math.random() > 0.5 ? 1 : -1) : 0;
-            const newSpo2 = Math.max(88, Math.min(100, device.rpmVitals.spo2Percent + spo2Delta));
-            
-            newVitals = {
-              ...device.rpmVitals,
-              heartRateBpm: newHr,
-              spo2Percent: newSpo2,
-              stepCount: device.rpmVitals.stepCount + (device.rpmVitals.activityState === 'walking' ? 2 : 0),
-              lastRpmSync: 'Just now',
-            };
-          }
-
-          return {
-            ...device,
-            telemetry: {
-              ...device.telemetry,
-              cpuUsagePercent: newCpu,
-              lastHeartbeat: 'Just now',
-            },
-            rpmVitals: newVitals,
-          };
-        });
-      });
-
-      // 2. Deployment Jobs Progress Simulation
+      // 1. Deployment Jobs Progress Simulation
       setDeploymentJobs(prevJobs => {
         return prevJobs.map(job => {
           if (job.status !== 'in_progress') return job;
@@ -376,7 +388,7 @@ export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         });
       });
 
-      // 3. Support Session Latency & Jitter
+      // 2. Support Session Latency & Jitter
       setRemoteSessions(prevSessions => {
         return prevSessions.map(sess => {
           if (sess.status !== 'ACTIVE') return sess;
@@ -499,7 +511,7 @@ export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     // Execute concurrently across target platform adapters
     const results = await Promise.all(
       targets.map(async device => {
-        const adapter = getDeviceAdapter(device.platform);
+        const adapter = getDeviceAdapter(device.platform, { isAmapiManaged: device.isAmapiManaged });
         try {
           const res = await adapter.executeCommand(device, command, payload);
           return {
@@ -1774,6 +1786,7 @@ export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     <DeviceContext.Provider
       value={{
         devices,
+        amapiStatus,
         commands,
         firmwarePackages,
         enrollmentSessions,
