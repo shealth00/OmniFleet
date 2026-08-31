@@ -52,16 +52,23 @@ export const EnrollmentCenterView: React.FC = () => {
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
-    const session = await createEnrollmentSession({
-      organization: currentOrganization.name,
-      targetPlatform,
-      connectionMode,
-      deviceGroup: targetGroup,
-      assignedPolicy,
-      singleUse,
-    });
-    setCreatedSession(session);
-    setScanToken(session.token);
+    try {
+      const session = await createEnrollmentSession({
+        organization: currentOrganization.name,
+        targetPlatform,
+        connectionMode,
+        deviceGroup: targetGroup,
+        assignedPolicy,
+        singleUse,
+      });
+      setCreatedSession(session);
+      setScanToken(session.token);
+    } catch (error) {
+      setEnrollResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to generate enrollment token'
+      });
+    }
   };
 
   const handleSimulatedEnroll = async () => {

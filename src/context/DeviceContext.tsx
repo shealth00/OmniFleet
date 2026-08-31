@@ -67,11 +67,7 @@ import {
   mockReportDefinitions 
 } from '../data/mockEnterprise';
 import { getDeviceAdapter } from '../adapters/deviceAdapters';
-import {
-  fetchEnrollmentSessions,
-  createEnrollmentSessionRemote,
-  completeEnrollmentRemote,
-} from '../services/enrollmentApi';
+import { apiClient } from '../services/api';
 
 interface DeviceContextType {
   // Core Devices & Platform
@@ -1115,110 +1111,137 @@ export const DeviceProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   // Existing Enrollment, Firmware & App Deployments
   const createEnrollmentSession = async (sessionData: Partial<EnrollmentSession>): Promise<EnrollmentSession> => {
-    const newSession = await createEnrollmentSessionRemote({
-      organization: sessionData.organization || currentOrganization.name,
-      site: sessionData.site || 'Chicago SNF Facility',
-      deviceGroup: sessionData.deviceGroup || 'Chicago SNF Group',
-      connectionMode: sessionData.connectionMode || 'kiosk',
-      targetPlatform: sessionData.targetPlatform || 'android',
-      assignedPolicy: sessionData.assignedPolicy || 'Strict Clinical Kiosk Policy (v2.4)',
-      singleUse: sessionData.singleUse !== undefined ? sessionData.singleUse : true,
-    });
+    try {
+      const tokenResponse = await apiClient.generateEnrollmentToken(86400);
+      const newToken = tokenResponse.token;
 
-    setEnrollmentSessions(prev => [newSession, ...prev]);
-    addAuditEvent({
-      actor: currentUser.name,
-      action: 'Generated New QR Enrollment Token',
-      category: 'enrollment',
-      severity: 'info',
-      details: `Target: ${newSession.targetPlatform} • Org: ${newSession.organization} • Token: ${newSession.token.slice(0, 5)}...`,
-    });
+      const newSession: EnrollmentSession = {
+        id: `enr-sess-${Date.now()}`,
+        token: newToken,
+        organization: sessionData.organization || currentOrganization.name,
+        site: sessionData.site || 'Chicago SNF Facility',
+        deviceGroup: sessionData.deviceGroup || 'Chicago SNF Group',
+        connectionMode: sessionData.connectionMode || 'kiosk',
+        targetPlatform: sessionData.targetPlatform || 'android',
+        assignedPolicy: sessionData.assignedPolicy || 'Strict Clinical Kiosk Policy (v2.4)',
+        createdDate: new Date().toISOString(),
+        expiresAt: tokenResponse.expiresAt,
+        singleUse: sessionData.singleUse !== undefined ? sessionData.singleUse : true,
+        used: false,
+        qrPayloadJson: JSON.stringify({
+          enrollmentPortalUrl: typeof window !== 'undefined' ? `${window.location.origin}/?enroll=${newToken}` : `https://omnifleet.example.com/?enroll=${newToken}`,
+          token: newToken,
+          org: sessionData.organization || currentOrganization.name,
+          site: sessionData.site || 'Chicago SNF Facility',
+          group: sessionData.deviceGroup || 'Chicago SNF Group',
+          platform: sessionData.targetPlatform || 'android',
+          mode: sessionData.connectionMode || 'kiosk',
+          nasShareUrl: 'smb://192.168.1.100/volume/projects',
+          exp: tokenResponse.expiresAt,
+        }, null, 2),
+      };
 
-    return newSession;
+      setEnrollmentSessions(prev => [newSession, ...prev]);
+      addAuditEvent({
+        actor: currentUser.name,
+        action: 'Generated New QR Enrollment Token',
+        category: 'enrollment',
+        severity: 'info',
+        details: `Target: ${newSession.targetPlatform} • Org: ${newSession.organization} • Token: ${newToken.slice(0, 5)}...`,
+      });
+
+      return newSession;
+    } catch (error) {
+      console.error('Failed to create enrollment session:', error);
+      throw error;
+    }
   };
 
-  const completeEnrollmentFromQR = async (
-    token: string,
-    newDeviceData: Partial<DeviceRecord>
-  ): Promise<{ success: boolean; device?: DeviceRecord; message: string }> => {
-    const session = enrollmentSessions.find(s => s.token === token);
-    const platform = (newDeviceData.platform || session?.targetPlatform || 'android') as PlatformType;
+  const completeEnrollmentFromQR = async (token: string, newDeviceData: Partial<DeviceRecord>) => {
+    try {
+      const session = enrollmentSessions.find(s => s.token === token && !s.used);
+      if (!session) {
+        return { success: false, message: 'Invalid or expired enrollment token.' };
+      }
 
-    // The backend is the source of truth: it atomically checks expiry and
-    // single-use, and works no matter which browser/device is completing it.
-    const remoteResult = await completeEnrollmentRemote(token, {
-      name: newDeviceData.name,
-      type: platform,
-    });
+      const deviceName = newDeviceData.name || `Enrolled Device`;
+      const deviceType = newDeviceData.deviceType === 'tablet' ? 'tablet' : 'smartphone';
 
-    if (!remoteResult.success) {
-      return { success: false, message: remoteResult.message };
+      const enrollmentResult = await apiClient.enrollDevice(token, {
+        name: deviceName,
+        type: deviceType,
+      });
+
+      const enrolledApiDevice = enrollmentResult.device;
+      const platform = (newDeviceData.platform || session.targetPlatform || 'android') as PlatformType;
+      const adapter = getDeviceAdapter(platform);
+
+      const newDevice: DeviceRecord = {
+        id: enrolledApiDevice.id,
+        deviceId: enrolledApiDevice.id,
+        name: enrolledApiDevice.name,
+        serialNumber: newDeviceData.serialNumber || `SN-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+        assetTag: newDeviceData.assetTag || `AST-${Math.floor(1000 + Math.random() * 9000)}`,
+        platform,
+        deviceType: newDeviceData.deviceType || 'tablet',
+        model: newDeviceData.model || 'Universal Enterprise Endpoint',
+        manufacturer: newDeviceData.manufacturer || 'Certified Hardware OEM',
+        osVersion: newDeviceData.osVersion || '14.0',
+        firmwareVersion: '1.0.0-PROD',
+        status: 'online',
+        lifecycleState: 'ACTIVE',
+        complianceState: 'COMPLIANT',
+        ownershipType: 'corporate_dedicated',
+        managementMode: session.connectionMode,
+        connectionMode: session.connectionMode,
+        organization: session.organization,
+        site: session.site,
+        deviceGroup: session.deviceGroup,
+        capabilities: adapter.getCapabilities(),
+        capabilitiesList: adapter.getCapabilityList(),
+        telemetry: {
+          batteryLevel: enrolledApiDevice.batteryLevel,
+          isCharging: true,
+          temperatureCelsius: 29.5,
+          cpuUsagePercent: enrolledApiDevice.cpuUsage,
+          ramUsagePercent: enrolledApiDevice.ramUsage,
+          storageUsedGb: 14.5,
+          storageTotalGb: 128,
+          wifiSsid: 'SH-Medical-Secure-5G',
+          wifiSignalDbm: enrolledApiDevice.wifiSignal,
+          ipAddress: '10.140.12.88',
+          macAddress: '9C:28:BF:33:9A:12',
+          screenOn: true,
+          screenLocked: false,
+          currentForegroundApp: 'org.sallyhealth.rpm.core',
+          lastHeartbeat: 'Just now',
+          lastSync: 'Just now',
+          uptimeHours: 1,
+        },
+        installedApps: ['org.sallyhealth.rpm.core', 'org.sallyhealth.kiosk.shell'],
+        enrolledAt: enrolledApiDevice.createdAt,
+        tags: ['Newly Enrolled', 'QR Token', platform],
+      };
+
+      setDevices(prev => [newDevice, ...prev]);
+      setEnrollmentSessions(prev =>
+        prev.map(s => (s.id === session.id ? { ...s, used: true, usedByDeviceId: newDevice.id } : s))
+      );
+
+      addAuditEvent({
+        actor: 'Device Self-Enrollment Service',
+        action: `Device Enrolled: ${newDevice.name}`,
+        category: 'enrollment',
+        severity: 'success',
+        details: `Enrolled via token ${token.slice(0, 5)}... assigned to ${newDevice.deviceGroup}`,
+      });
+
+      return { success: true, device: newDevice, message: 'Device successfully enrolled.' };
+    } catch (error) {
+      console.error('Enrollment failed:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Device enrollment failed.';
+      return { success: false, message: errorMessage };
     }
-
-    const newId = remoteResult.backendDeviceId || `dev-enr-${Date.now()}`;
-    const adapter = getDeviceAdapter(platform);
-
-    const newDevice: DeviceRecord = {
-      id: newId,
-      deviceId: newId,
-      name: newDeviceData.name || `Enrolled Device (${platform.toUpperCase()})`,
-      serialNumber: newDeviceData.serialNumber || `SN-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-      assetTag: newDeviceData.assetTag || `AST-${Math.floor(1000 + Math.random() * 9000)}`,
-      platform,
-      deviceType: newDeviceData.deviceType || 'tablet',
-      model: newDeviceData.model || 'Universal Enterprise Endpoint',
-      manufacturer: newDeviceData.manufacturer || 'Certified Hardware OEM',
-      osVersion: newDeviceData.osVersion || '14.0',
-      firmwareVersion: '1.0.0-PROD',
-      status: 'online',
-      lifecycleState: 'ACTIVE',
-      complianceState: 'COMPLIANT',
-      ownershipType: 'corporate_dedicated',
-      managementMode: session?.connectionMode || 'kiosk',
-      connectionMode: session?.connectionMode || 'kiosk',
-      organization: session?.organization || currentOrganization.name,
-      site: session?.site,
-      deviceGroup: session?.deviceGroup,
-      capabilities: adapter.getCapabilities(),
-      capabilitiesList: adapter.getCapabilityList(),
-      telemetry: {
-        batteryLevel: 98,
-        isCharging: true,
-        temperatureCelsius: 29.5,
-        cpuUsagePercent: 12,
-        ramUsagePercent: 34,
-        storageUsedGb: 14.5,
-        storageTotalGb: 128,
-        wifiSsid: 'SH-Medical-Secure-5G',
-        wifiSignalDbm: -48,
-        ipAddress: '10.140.12.88',
-        macAddress: '9C:28:BF:33:9A:12',
-        screenOn: true,
-        screenLocked: false,
-        currentForegroundApp: 'org.sallyhealth.rpm.core',
-        lastHeartbeat: 'Just now',
-        lastSync: 'Just now',
-        uptimeHours: 1,
-      },
-      installedApps: ['org.sallyhealth.rpm.core', 'org.sallyhealth.kiosk.shell'],
-      enrolledAt: new Date().toISOString(),
-      tags: ['Newly Enrolled', 'QR Token', platform],
-    };
-
-    setDevices(prev => [newDevice, ...prev]);
-    setEnrollmentSessions(prev =>
-      prev.map(s => (s.token === token ? { ...s, used: true, usedByDeviceId: newId } : s))
-    );
-
-    addAuditEvent({
-      actor: 'Device Self-Enrollment Service',
-      action: `Device Enrolled: ${newDevice.name}`,
-      category: 'enrollment',
-      severity: 'success',
-      details: `Enrolled via token ${token.slice(0, 5)}... assigned to ${newDevice.deviceGroup}`,
-    });
-
-    return { success: true, device: newDevice, message: remoteResult.message };
   };
 
   const startFirmwareRollout = (packageId: string, targetDeviceIds: string[]) => {

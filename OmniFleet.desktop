@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=OmniFleet
+Comment=Device Operations Console
+Exec=/home/user/OmniFleet/launcher.sh
+Icon=application-x-executable
+Terminal=true
+Categories=Utility;Application;
+StartupNotify=true
+Path=/home/user/OmniFleet
