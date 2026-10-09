@@ -24,6 +24,8 @@ import { ApiSdkExplorer } from './components/ApiSdkExplorer';
 import { QREnrollmentModal } from './components/QREnrollmentModal';
 import { DeviceDetailModal } from './components/DeviceDetailModal';
 import { MobileDeviceEnrollmentPortal } from './components/MobileDeviceEnrollmentPortal';
+import { GoogleEMMIntegrationView } from './components/GoogleEMMIntegrationView';
+import { CentralizedControlView } from './components/CentralizedControlView';
 
 const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('fleet');
@@ -131,6 +133,10 @@ const AppContent: React.FC = () => {
           {activeTab === 'audit' && <AuditTrailView />}
 
           {activeTab === 'api_sdk' && <ApiSdkExplorer />}
+
+          {activeTab === 'emm_integration' && <GoogleEMMIntegrationView />}
+
+          {activeTab === 'centralized_control' && <CentralizedControlView />}
 
         </main>
       </div>

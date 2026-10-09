@@ -1,12 +1,12 @@
 import React from 'react';
-import { 
-  Server, 
-  Terminal, 
-  ArrowUpCircle, 
-  QrCode, 
-  HeartPulse, 
-  Layers, 
-  Code, 
+import {
+  Server,
+  Terminal,
+  ArrowUpCircle,
+  QrCode,
+  HeartPulse,
+  Layers,
+  Code,
   ShieldCheck,
   ShieldAlert,
   Radio,
@@ -17,7 +17,8 @@ import {
   MapPin,
   FileText,
   Watch,
-  Zap
+  Zap,
+  Cloud
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -85,6 +86,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           icon: Users,
           description: 'Static & self-updating criteria',
         },
+        {
+          id: 'emm_integration',
+          label: 'Google EMM Integration',
+          icon: Cloud,
+          badge: 'Enterprise',
+          badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/40',
+          description: 'Zero-Touch EMM enrollment',
+        },
       ]
     },
     {
@@ -140,6 +149,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           badge: 'Wi-Fi 6',
           badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 font-bold',
           description: 'Code-Server, NAS sync, SCRCPY & ADB',
+        },
+        {
+          id: 'centralized_control',
+          label: 'Centralized Device Control',
+          icon: Radio,
+          badge: 'Bulk Ops',
+          badgeColor: 'bg-purple-500/20 text-purple-300 border-purple-500/40',
+          description: 'Remote commands & app deployment',
         },
       ]
     },
