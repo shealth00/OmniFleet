@@ -120,7 +120,7 @@ export const CentralizedControlView: React.FC = () => {
     },
     {
       label: 'Avg Battery',
-      value: Math.round(devices.reduce((sum, d) => sum + d.batteryLevel, 0) / devices.length) + '%',
+      value: devices.length > 0 ? Math.round(devices.reduce((sum, d) => sum + d.batteryLevel, 0) / devices.length) + '%' : '—',
       icon: Zap,
       color: 'yellow',
     },
