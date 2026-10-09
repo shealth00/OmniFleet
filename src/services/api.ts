@@ -230,4 +230,93 @@ export const apiClient = {
     }
     return response.json();
   },
+
+  // Device Control endpoints
+  async getControlDevices(filters?: { status?: string; type?: string; group?: string }) {
+    const params = new URLSearchParams();
+    if (filters?.status) params.append('status', filters.status);
+    if (filters?.type) params.append('type', filters.type);
+    if (filters?.group) params.append('group', filters.group);
+
+    const response = await fetch(`${API_BASE_URL}/api/control/devices?${params.toString()}`);
+    if (!response.ok) {
+      throw new Error(`Failed to get control devices: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async issueDeviceCommand(deviceId: string, command: string, params?: Record<string, any>) {
+    const response = await fetch(`${API_BASE_URL}/api/control/devices/${deviceId}/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command, params }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to issue device command: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async pushAppToDevices(deviceIds: string[], appPackage: string, appName?: string) {
+    const response = await fetch(`${API_BASE_URL}/api/control/devices/push-app`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceIds, appPackage, appName }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to push app: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async pushPolicyToDevices(deviceIds: string[], policy: any, policyName?: string) {
+    const response = await fetch(`${API_BASE_URL}/api/control/devices/push-policy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceIds, policy, policyName }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to push policy: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async getDeviceCommandStatus(deviceId: string, commandId: string) {
+    const response = await fetch(`${API_BASE_URL}/api/control/devices/${deviceId}/command-status/${commandId}`);
+    if (!response.ok) {
+      throw new Error(`Failed to get command status: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async captureDeviceScreenshot(deviceId: string) {
+    const response = await fetch(`${API_BASE_URL}/api/control/devices/${deviceId}/screenshot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to capture screenshot: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async getDeviceTelemetry(deviceId: string) {
+    const response = await fetch(`${API_BASE_URL}/api/control/devices/${deviceId}/telemetry`);
+    if (!response.ok) {
+      throw new Error(`Failed to get device telemetry: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async bulkDeviceAction(action: string, deviceIds: string[], parameters?: any) {
+    const response = await fetch(`${API_BASE_URL}/api/control/devices/bulk-action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, deviceIds, parameters }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to execute bulk action: ${response.statusText}`);
+    }
+    return response.json();
+  },
 };

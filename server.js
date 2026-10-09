@@ -440,6 +440,242 @@ app.get('/api/emm/enterprises/:enterpriseId/audit-logs', (req, res) => {
   });
 });
 
+// DEVICE CONTROL ENDPOINTS - Centralized Control Point
+
+// Get all devices for remote management
+app.get('/api/control/devices', (req, res) => {
+  const { status, type, group } = req.query;
+
+  let filtered = devices;
+  if (status) filtered = filtered.filter(d => d.status === status);
+  if (type) filtered = filtered.filter(d => d.type === type);
+
+  res.json({
+    devices: filtered.map(d => ({
+      id: d.id,
+      name: d.name,
+      type: d.type,
+      status: d.status,
+      batteryLevel: d.batteryLevel,
+      cpuUsage: d.cpuUsage,
+      ramUsage: d.ramUsage,
+      lastSeen: d.lastSeen,
+      emmEnterpriseId: d.emmEnterpriseId,
+    })),
+    total: filtered.length,
+  });
+});
+
+// Issue remote command to device (reboot, lock, clear data)
+app.post('/api/control/devices/:id/command', (req, res) => {
+  const { command, params } = req.body;
+  const device = devices.find(d => d.id === req.params.id);
+
+  if (!device) {
+    return res.status(404).json({ error: 'Device not found' });
+  }
+
+  const validCommands = ['REBOOT', 'LOCK', 'WIPE', 'CLEAR_APP_DATA', 'UPDATE_POLICY'];
+  if (!validCommands.includes(command)) {
+    return res.status(400).json({
+      error: 'Invalid command',
+      supportedCommands: validCommands,
+    });
+  }
+
+  // Simulate command execution
+  const commandId = uuidv4();
+  const result = {
+    commandId,
+    deviceId: device.id,
+    deviceName: device.name,
+    command,
+    status: 'executing',
+    issuedAt: new Date().toISOString(),
+    estimatedCompletionTime: new Date(Date.now() + 30000).toISOString(),
+  };
+
+  res.status(202).json({
+    ...result,
+    message: `Command ${command} issued to device ${device.name}`,
+  });
+});
+
+// Push app to device(s)
+app.post('/api/control/devices/push-app', (req, res) => {
+  const { deviceIds, appPackage, appName, targetDevices } = req.body;
+
+  if (!appPackage) {
+    return res.status(400).json({ error: 'App package name required' });
+  }
+
+  // Target specific devices or all with matching status
+  let targetList = deviceIds ? devices.filter(d => deviceIds.includes(d.id)) : devices;
+
+  if (targetDevices === 'all-online') {
+    targetList = devices.filter(d => d.status === 'connected' || d.status === 'online');
+  } else if (targetDevices === 'all-enrolled') {
+    targetList = devices.filter(d => d.emmEnterpriseId);
+  }
+
+  const deploymentId = uuidv4();
+  const result = {
+    deploymentId,
+    appPackage,
+    appName: appName || appPackage,
+    targetDevices: targetList.length,
+    status: 'pushing',
+    startTime: new Date().toISOString(),
+    devices: targetList.map(d => ({
+      deviceId: d.id,
+      deviceName: d.name,
+      status: 'pending',
+    })),
+  };
+
+  res.status(202).json({
+    ...result,
+    message: `App ${appName || appPackage} being pushed to ${targetList.length} device(s)`,
+  });
+});
+
+// Push configuration/policy to device(s)
+app.post('/api/control/devices/push-policy', (req, res) => {
+  const { deviceIds, policy, policyName } = req.body;
+
+  if (!policy) {
+    return res.status(400).json({ error: 'Policy configuration required' });
+  }
+
+  const targetList = deviceIds ? devices.filter(d => deviceIds.includes(d.id)) : devices;
+  const deploymentId = uuidv4();
+
+  const result = {
+    deploymentId,
+    policyName: policyName || 'Security Policy',
+    policy: {
+      restrictions: policy.restrictions || [],
+      requirements: policy.requirements || [],
+      enforceAt: new Date(Date.now() + 5000).toISOString(),
+    },
+    targetDevices: targetList.length,
+    status: 'deploying',
+    devices: targetList.map(d => ({
+      deviceId: d.id,
+      deviceName: d.name,
+      status: 'deploying',
+    })),
+  };
+
+  res.status(202).json({
+    ...result,
+    message: `Policy deployed to ${targetList.length} device(s)`,
+  });
+});
+
+// Get device command status
+app.get('/api/control/devices/:id/command-status/:commandId', (req, res) => {
+  const { id, commandId } = req.params;
+  const device = devices.find(d => d.id === id);
+
+  if (!device) {
+    return res.status(404).json({ error: 'Device not found' });
+  }
+
+  res.json({
+    commandId,
+    deviceId: id,
+    deviceName: device.name,
+    status: 'completed',
+    completedAt: new Date().toISOString(),
+    result: {
+      success: true,
+      message: 'Command executed successfully',
+    },
+  });
+});
+
+// Remote screen capture
+app.post('/api/control/devices/:id/screenshot', (req, res) => {
+  const device = devices.find(d => d.id === req.params.id);
+
+  if (!device) {
+    return res.status(404).json({ error: 'Device not found' });
+  }
+
+  res.json({
+    deviceId: device.id,
+    deviceName: device.name,
+    screenshotUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    capturedAt: new Date().toISOString(),
+    message: 'Screenshot captured successfully',
+  });
+});
+
+// Real-time device telemetry stream
+app.get('/api/control/devices/:id/telemetry', (req, res) => {
+  const device = devices.find(d => d.id === req.params.id);
+
+  if (!device) {
+    return res.status(404).json({ error: 'Device not found' });
+  }
+
+  res.json({
+    deviceId: device.id,
+    deviceName: device.name,
+    timestamp: new Date().toISOString(),
+    telemetry: {
+      batteryLevel: device.batteryLevel,
+      batteryHealth: 'good',
+      isCharging: true,
+      temperature: 32.5,
+      cpuUsagePercent: device.cpuUsage,
+      ramUsagePercent: device.ramUsage,
+      ramTotalGb: 8,
+      storageUsedGb: 45,
+      storageTotalGb: 128,
+      wifiSignalDbm: device.wifiSignal,
+      uptime: '2 days 4 hours',
+      lastSyncTime: device.lastSeen,
+    },
+  });
+});
+
+// Bulk device management
+app.post('/api/control/devices/bulk-action', (req, res) => {
+  const { action, deviceIds, parameters } = req.body;
+
+  if (!action || !deviceIds || !Array.isArray(deviceIds)) {
+    return res.status(400).json({
+      error: 'Missing action or deviceIds array',
+    });
+  }
+
+  const validActions = ['RESTART', 'UPDATE', 'LOCK', 'ENFORCE_COMPLIANCE'];
+  if (!validActions.includes(action)) {
+    return res.status(400).json({
+      error: 'Invalid bulk action',
+      supportedActions: validActions,
+    });
+  }
+
+  const targetDevices = devices.filter(d => deviceIds.includes(d.id));
+  const jobId = uuidv4();
+
+  res.status(202).json({
+    jobId,
+    action,
+    targetCount: targetDevices.length,
+    status: 'processing',
+    startTime: new Date().toISOString(),
+    results: targetDevices.map(d => ({
+      deviceId: d.id,
+      deviceName: d.name,
+      status: 'processing',
+    })),
+  });
+});
+
 // SPA fallback: serve index.html for all non-API routes
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
