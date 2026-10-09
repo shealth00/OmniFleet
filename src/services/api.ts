@@ -141,11 +141,92 @@ export const apiClient = {
     return response.json();
   },
 
-  // Health check
+// Health check
   async healthCheck() {
     const response = await fetch(`${API_BASE_URL}/api/health`);
     if (!response.ok) {
       throw new Error(`Health check failed: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  // Google EMM Integration endpoints
+  async getEMMStatus() {
+    const response = await fetch(`${API_BASE_URL}/api/emm/status`);
+    if (!response.ok) {
+      throw new Error(`Failed to get EMM status: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async initiateEMMOAuth() {
+    const response = await fetch(`${API_BASE_URL}/api/emm/oauth/initiate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to initiate EMM OAuth: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async handleEMMOAuthCallback(code: string, state: string) {
+    const response = await fetch(`${API_BASE_URL}/api/emm/oauth/callback?code=${code}&state=${state}`);
+    if (!response.ok) {
+      throw new Error(`Failed to handle EMM OAuth callback: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async listEnterprises() {
+    const response = await fetch(`${API_BASE_URL}/api/emm/enterprises`);
+    if (!response.ok) {
+      throw new Error(`Failed to list enterprises: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async createEnterpriseEnrollmentToken(enterpriseId: string, duration?: number) {
+    const response = await fetch(`${API_BASE_URL}/api/emm/enterprises/${enterpriseId}/enrollment-tokens`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ duration: duration || 86400 }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to create enrollment token: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async getEnterpriseDevices(enterpriseId: string) {
+    const response = await fetch(`${API_BASE_URL}/api/emm/enterprises/${enterpriseId}/devices`);
+    if (!response.ok) {
+      throw new Error(`Failed to get enterprise devices: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async syncDeviceWithEMM(enterpriseId: string, deviceId: string) {
+    const response = await fetch(`${API_BASE_URL}/api/emm/enterprises/${enterpriseId}/devices/${deviceId}/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to sync device with EMM: ${response.statusText}`);
+    }
+    return response.json();
+  },
+
+  async getEnterpriseAuditLogs(enterpriseId: string, options?: { pageSize?: number; pageToken?: string }) {
+    const params = new URLSearchParams();
+    if (options?.pageSize) params.append('pageSize', options.pageSize.toString());
+    if (options?.pageToken) params.append('pageToken', options.pageToken);
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/emm/enterprises/${enterpriseId}/audit-logs?${params.toString()}`
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to get audit logs: ${response.statusText}`);
     }
     return response.json();
   },

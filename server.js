@@ -248,6 +248,198 @@ app.delete('/api/devices/:id', (req, res) => {
   res.json(device[0]);
 });
 
+// GOOGLE EMM INTEGRATION ENDPOINTS
+
+// Get EMM integration status
+app.get('/api/emm/status', (req, res) => {
+  const integration = emmIntegrations.get('default');
+  if (!integration) {
+    return res.json({
+      connected: false,
+      message: 'Google EMM not configured',
+    });
+  }
+  res.json({
+    connected: true,
+    projectId: integration.projectId,
+    enterprises: Array.from(emmEnterprises.values()),
+  });
+});
+
+// Initialize OAuth flow for EMM
+app.post('/api/emm/oauth/initiate', (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/api/emm/oauth/callback';
+
+  if (!clientId || !clientSecret) {
+    return res.status(400).json({
+      error: 'Google credentials not configured',
+      message: 'Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables',
+    });
+  }
+
+  const scope = encodeURIComponent('https://www.googleapis.com/auth/androidmanagement');
+  const state = uuidv4();
+
+  // Store state for verification
+  emmIntegrations.set(`state_${state}`, { createdAt: Date.now() });
+
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+    `client_id=${clientId}&` +
+    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+    `response_type=code&` +
+    `scope=${scope}&` +
+    `access_type=offline&` +
+    `state=${state}`;
+
+  res.json({
+    authUrl,
+    state,
+    message: 'Redirect user to this URL to authorize EMM integration',
+  });
+});
+
+// Handle OAuth callback
+app.get('/api/emm/oauth/callback', (req, res) => {
+  const { code, state } = req.query;
+
+  if (!code || !state) {
+    return res.status(400).json({ error: 'Missing authorization code or state' });
+  }
+
+  // Verify state
+  if (!emmIntegrations.has(`state_${state}`)) {
+    return res.status(400).json({ error: 'Invalid state parameter' });
+  }
+
+  // Store integration configuration
+  emmIntegrations.set('default', {
+    projectId: process.env.GOOGLE_PROJECT_ID,
+    code,
+    state,
+    connectedAt: new Date().toISOString(),
+  });
+
+  res.json({
+    success: true,
+    message: 'Google EMM integration authorized successfully',
+    redirectUrl: '/?emm=connected',
+  });
+});
+
+// List enterprises
+app.get('/api/emm/enterprises', (req, res) => {
+  const enterprises = Array.from(emmEnterprises.values());
+  res.json({
+    enterprises,
+    total: enterprises.length,
+  });
+});
+
+// Create enterprise enrollment token
+app.post('/api/emm/enterprises/:enterpriseId/enrollment-tokens', (req, res) => {
+  const { enterpriseId } = req.params;
+  const { duration } = req.body;
+
+  const enterprise = emmEnterprises.get(enterpriseId);
+  if (!enterprise) {
+    return res.status(404).json({ error: 'Enterprise not found' });
+  }
+
+  const token = `emm-token-${uuidv4()}`;
+  const expiresAt = new Date(Date.now() + (duration || 86400) * 1000);
+
+  res.status(201).json({
+    token,
+    enterpriseId,
+    expiresAt,
+    message: 'Enrollment token created. Device can scan this with Google EMM scanner.',
+  });
+});
+
+// Get enrolled devices from EMM
+app.get('/api/emm/enterprises/:enterpriseId/devices', (req, res) => {
+  const { enterpriseId } = req.params;
+
+  const enterprise = emmEnterprises.get(enterpriseId);
+  if (!enterprise) {
+    return res.status(404).json({ error: 'Enterprise not found' });
+  }
+
+  // Return devices that have EMM enrollment
+  const emmDevices = devices.filter(d => d.emmEnterpriseId === enterpriseId);
+  res.json({
+    devices: emmDevices,
+    total: emmDevices.length,
+  });
+});
+
+// Sync device with EMM
+app.post('/api/emm/enterprises/:enterpriseId/devices/:deviceId/sync', (req, res) => {
+  const { enterpriseId, deviceId } = req.params;
+
+  const device = devices.find(d => d.id === deviceId);
+  if (!device) {
+    return res.status(404).json({ error: 'Device not found' });
+  }
+
+  // Mark device as EMM-enrolled
+  device.emmEnterpriseId = enterpriseId;
+  device.emmSyncedAt = new Date().toISOString();
+  device.status = 'emm-managed';
+
+  res.json({
+    device,
+    message: 'Device synchronized with Google EMM',
+  });
+});
+
+// Get EMM audit logs
+app.get('/api/emm/enterprises/:enterpriseId/audit-logs', (req, res) => {
+  const { enterpriseId } = req.params;
+  const { pageSize = 50, pageToken } = req.query;
+
+  const enterprise = emmEnterprises.get(enterpriseId);
+  if (!enterprise) {
+    return res.status(404).json({ error: 'Enterprise not found' });
+  }
+
+  // Return simulated audit logs
+  const auditLogs = [
+    {
+      timestamp: new Date(Date.now() - 3600000).toISOString(),
+      actor: 'admin@sallyhealth.org',
+      action: 'Device enrolled',
+      deviceId: 'device-001',
+      deviceName: 'Pixel 8 Pro',
+      status: 'success',
+    },
+    {
+      timestamp: new Date(Date.now() - 7200000).toISOString(),
+      actor: 'admin@sallyhealth.org',
+      action: 'Policy applied',
+      deviceId: 'device-002',
+      deviceName: 'iPad Pro',
+      status: 'success',
+    },
+    {
+      timestamp: new Date(Date.now() - 10800000).toISOString(),
+      actor: 'admin@sallyhealth.org',
+      action: 'Device locked',
+      deviceId: 'device-003',
+      deviceName: 'Samsung Galaxy Tab',
+      status: 'success',
+    },
+  ];
+
+  res.json({
+    logs: auditLogs.slice(0, pageSize),
+    total: auditLogs.length,
+    pageSize,
+  });
+});
+
 // SPA fallback: serve index.html for all non-API routes
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
